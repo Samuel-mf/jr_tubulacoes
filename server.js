@@ -18,6 +18,7 @@ const pool = new Pool({
   password: process.env.DB_PASSWORD || 'postgres',
 });
 
+
 // Tornar pool acessível nas rotas
 app.set('db', pool);
 
