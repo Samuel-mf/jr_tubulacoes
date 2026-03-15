@@ -11,11 +11,11 @@ const PORT = process.env.PORT || 3000;
 
 // ── PostgreSQL ──────────────────────────────────────────
 const pool = new Pool({
-  host: process.env.DB_HOST || 'localhost',
+  host: process.env.DB_HOST || 'db',
   port: parseInt(process.env.DB_PORT) || 5432,
-  database: process.env.DB_NAME || 'rjtubulacao',
-  user: process.env.DB_USER || 'rjtubulacao',
-  password: process.env.DB_PASS || 'password',
+  database: process.env.DB_NAME || 'appdb',
+  user: process.env.DB_USER || 'postgres',
+  password: process.env.DB_PASSWORD || 'postgres',
 });
 
 // Tornar pool acessível nas rotas
