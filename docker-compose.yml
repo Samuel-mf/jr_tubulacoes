@@ -1,56 +1,29 @@
-version: '3.8'
-
 services:
+
   app:
     build: .
-    container_name: jr-tubulacao-app
-    restart: unless-stopped
-    ports:
-      - "${PORT:-3000}:3000"
+    restart: always
     environment:
-      - NODE_ENV=production
-      - PORT=3000
-      - DB_HOST=db
-      - DB_PORT=5432
-      - DB_NAME=${DB_NAME:-rjtubulacao}
-      - DB_USER=${DB_USER:-rjtubulacao}
-      - DB_PASS=${DB_PASS:-SuaSenhaSeguraAqui}
-      - JWT_SECRET=${JWT_SECRET:-mude-esta-chave}
-      - ADMIN_USER=${ADMIN_USER:-admin}
-      - ADMIN_PASS=${ADMIN_PASS:-admin123}
-      - WHATSAPP_NUMBER=${WHATSAPP_NUMBER:-5521999999999}
-    volumes:
-      - uploads_data:/app/uploads
+      NODE_ENV: production
+      PORT: 3000
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: appdb
     depends_on:
-      db:
-        condition: service_healthy
-    networks:
-      - rj-network
+      - db
 
   db:
-    image: postgres:16-alpine
-    container_name: jr-tubulacao-db
-    restart: unless-stopped
+    image: postgres:15
+    restart: always
     environment:
-      - POSTGRES_DB=${DB_NAME:-rjtubulacao}
-      - POSTGRES_USER=${DB_USER:-rjtubulacao}
-      - POSTGRES_PASSWORD=${DB_PASS:-SuaSenhaSeguraAqui}
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: appdb
     volumes:
-      - pg_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql
-    healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U ${DB_USER:-rjtubulacao}" ]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    networks:
-      - rj-network
 
 volumes:
-  pg_data:
-  uploads_data:
-
-
-networks:
-  rj-network:
-    driver: bridge
+  postgres_data:
