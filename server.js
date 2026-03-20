@@ -11,13 +11,17 @@ const PORT = process.env.PORT || 3000;
 
 // ── PostgreSQL ──────────────────────────────────────────
 const pool = new Pool({
-  host: process.env.DB_HOST || 'db',
+  host: process.env.DB_HOST || 'infra_postgres',
   port: parseInt(process.env.DB_PORT) || 5432,
-  database: process.env.DB_NAME || 'rjtubulacao',
-  user: process.env.DB_USER || 'rjtubulacao',
-  password: process.env.DB_PASS || '6Q2&22ndBH$h',
+  database: process.env.DB_NAME || 'jr_tubulacoes',
+  user: process.env.DB_USER || 'flowbuilding',
+  password: process.env.DB_PASS || '',
 });
 
+// Testar conexão
+pool.connect()
+  .then(() => console.log('✓ Conectado ao PostgreSQL'))
+  .catch(err => console.error('❌ Erro ao conectar no banco:', err.message));
 
 // Tornar pool acessível nas rotas
 app.set('db', pool);
@@ -50,7 +54,7 @@ app.use('/api/gallery', galleryRouter);
 app.use('/api/contact', contactRouter);
 app.use('/api/auth', authRouter);
 
-// ── Rota para config pública (WhatsApp number) ──────────
+// ── Config pública ──────────────────────────────────────
 app.get('/api/config', (req, res) => {
   res.json({
     whatsapp: process.env.WHATSAPP_NUMBER || '5519998038607',
@@ -67,13 +71,22 @@ app.get('*', (req, res) => {
 async function initializeAdmin() {
   try {
     const adminUser = process.env.ADMIN_USER || 'admin';
-    const adminPass = process.env.ADMIN_PASS || 'admin123';
-    
+    const adminPass = process.env.ADMIN_PASS || 'Sam1530$';
+
+    // Criar tabela se não existir
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS admin_users (
+        id SERIAL PRIMARY KEY,
+        username TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL
+      )
+    `);
+
     const existing = await pool.query(
       'SELECT id FROM admin_users WHERE username = $1',
       [adminUser]
     );
-    
+
     if (existing.rows.length === 0) {
       const hash = await bcrypt.hash(adminPass, 10);
       await pool.query(
@@ -81,19 +94,21 @@ async function initializeAdmin() {
         [adminUser, hash]
       );
       console.log(`✓ Admin "${adminUser}" criado com sucesso.`);
+    } else {
+      console.log('✓ Admin já existe');
     }
   } catch (err) {
-    console.error('Aviso: Não foi possível inicializar admin —', err.message);
+    console.error('❌ Erro ao inicializar admin:', err.message);
   }
 }
 
 app.listen(PORT, async () => {
   console.log(`
-  ╔══════════════════════════════════════════════╗
-  ║   JR Tubulação de Gás — Servidor Online     ║
-  ║   http://localhost:${PORT}                      ║
-  ╚══════════════════════════════════════════════╝
-  `);
+╔══════════════════════════════════════════════╗
+║   JR Tubulação de Gás — Servidor Online     ║
+║   Porta: ${PORT}
+╚══════════════════════════════════════════════╝
+`);
   await initializeAdmin();
 });
 
