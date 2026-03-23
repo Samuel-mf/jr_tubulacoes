@@ -19,9 +19,14 @@ router.post('/', async (req, res) => {
 
     const recaptchaSecret = process.env.RECAPTCHA_SECRET_KEY;
     if (recaptchaSecret && recaptchaSecret !== 'SuaSecretKeyAqui') {
-      const googleVerifyUrl = `https://www.google.com/recaptcha/api/siteverify?secret=${recaptchaSecret}&response=${recaptchaToken}`;
-      const recaptchaRes = await axios.post(googleVerifyUrl);
+      const params = new URLSearchParams();
+      params.append('secret', recaptchaSecret);
+      params.append('response', recaptchaToken);
+      
+      const recaptchaRes = await axios.post('https://www.google.com/recaptcha/api/siteverify', params);
+      
       if (!recaptchaRes.data.success) {
+        console.error('Erro do Google reCAPTCHA:', recaptchaRes.data);
         return res.status(400).json({ error: 'Falha na verificação do reCAPTCHA.' });
       }
     }
