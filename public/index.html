@@ -36,6 +36,8 @@
   <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
   <!-- Swiper.js CSS -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swiper@11/swiper-bundle.min.css" />
+  <!-- reCAPTCHA v2 API -->
+  <script src="https://www.google.com/recaptcha/api.js" async defer></script>
 </head>
 <body>
 
@@ -221,7 +223,7 @@
               </div>
               <div class="info">
                 <div class="label">E-mail</div>
-                <div class="value">contato@rjtubulacao.com.br</div>
+                <div class="value">jrtubulacaodegas@gmail.com</div>
               </div>
             </div>
 
@@ -284,6 +286,10 @@
             <div class="form-group">
               <label for="message">Mensagem</label>
               <textarea id="message" name="message" placeholder="Descreva o seu projeto ou necessidade..."></textarea>
+            </div>
+
+            <div class="form-group" style="padding-top: 8px;">
+              <div class="g-recaptcha" data-sitekey="SUA_SITE_KEY_AQUI" style="margin-bottom: 16px;"></div>
             </div>
 
             <div class="form-submit">
