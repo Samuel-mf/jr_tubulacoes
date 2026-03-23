@@ -18,16 +18,26 @@ router.post('/', async (req, res) => {
     }
 
     const recaptchaSecret = process.env.RECAPTCHA_SECRET_KEY;
-    if (recaptchaSecret && recaptchaSecret !== 'SuaSecretKeyAqui') {
-      const params = new URLSearchParams();
-      params.append('secret', recaptchaSecret);
-      params.append('response', recaptchaToken);
-      
-      const recaptchaRes = await axios.post('https://www.google.com/recaptcha/api/siteverify', params);
-      
-      if (!recaptchaRes.data.success) {
-        console.error('Erro do Google reCAPTCHA:', recaptchaRes.data);
-        return res.status(400).json({ error: 'Falha na verificação do reCAPTCHA.' });
+    if (recaptchaSecret && recaptchaSecret !== 'SuaSecretKeyAqui' && recaptchaSecret !== '6LdAO5QsAAAAAOOMQFAdfu_uFm-Lwj4YuC5V_RnP_placeholder') {
+      try {
+        const params = new URLSearchParams();
+        params.append('secret', recaptchaSecret);
+        params.append('response', recaptchaToken);
+        
+        // Pass params.toString() explicitly and add the header manually to guarantee compatibility
+        const recaptchaRes = await axios.post('https://www.google.com/recaptcha/api/siteverify', params.toString(), {
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded'
+          }
+        });
+        
+        if (!recaptchaRes.data.success) {
+          console.error('Erro do Google reCAPTCHA:', recaptchaRes.data);
+          return res.status(400).json({ error: 'Falha na validação do reCAPTCHA (Success=false).' });
+        }
+      } catch (axiosErr) {
+        console.error('Exceção ao contatar a API do reCAPTCHA:', axiosErr.message);
+        return res.status(500).json({ error: 'Erro de conexão com o servidor do reCAPTCHA: ' + axiosErr.message });
       }
     }
     
@@ -51,7 +61,7 @@ router.post('/', async (req, res) => {
 
         const mailOptions = {
           from: process.env.EMAIL_USER,
-          to: 'jrtubulacaodegas@gmail.com', // e-mail do cliente
+          to: 'jrtubulacaodegas@gmail.com',
           subject: `Novo Pedido de Orçamento: ${name}`,
           text: `Você recebeu um novo contato pelo site.\n\nNome: ${name}\nTelefone: ${phone}\nE-mail: ${email || 'Não informado'}\nServiço: ${service_interest || 'Não informado'}\nMensagem: ${message || 'Não informada'}\n\nAcesse o painel para gerenciar os contatos.`
         };
@@ -59,10 +69,10 @@ router.post('/', async (req, res) => {
         await transporter.sendMail(mailOptions);
         console.log('E-mail enviado com sucesso para o administrador.');
       } else {
-        console.log('E-mail não enviado: credenciais faltando no .env');
+        console.log('E-mail não enviado: credenciais faltando ou placeholder no .env');
       }
     } catch (e) {
-      console.error('Erro ao enviar email:', e.message);
+      console.error('Erro ao enviar email (Nodemailer):', e.message);
     }
     
     res.status(201).json({ 
@@ -70,8 +80,9 @@ router.post('/', async (req, res) => {
       contact: result.rows[0]
     });
   } catch (err) {
-    console.error('Erro ao salvar contato:', err);
-    res.status(500).json({ error: 'Erro ao enviar orçamento.' });
+    console.error('Erro Crítico ao processar contato:', err.stack);
+    // Return actual error message so the user sees what's failing on screen
+    res.status(500).json({ error: 'Erro interno no banco/servidor: ' + err.message });
   }
 });
 
