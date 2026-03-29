@@ -1,114 +1,104 @@
 const express = require('express');
-const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
 const router = express.Router();
 const { verifyToken } = require('./auth');
+const { callExecutor } = require('../lib/executor');
 
-// ── Configuração do Multer ──────────────────────────────
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const uploadDir = path.join(__dirname, '..', 'uploads');
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-    cb(null, uploadDir);
-  },
-  filename: (req, file, cb) => {
-    const uniqueName = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const ext = path.extname(file.originalname);
-    cb(null, uniqueName + ext);
-  }
-});
-
-const fileFilter = (req, file, cb) => {
-  const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
-  if (allowed.includes(file.mimetype)) {
-    cb(null, true);
-  } else {
-    cb(new Error('Formato de imagem não suportado. Use JPG, PNG, WebP ou GIF.'), false);
-  }
-};
-
-const upload = multer({
-  storage,
-  fileFilter,
-  limits: { fileSize: 10 * 1024 * 1024 } // 10MB
-});
-
-// ── GET /api/gallery — Listar imagens (público) ─────────
+// ── GET /api/gallery — Listar imagens (público) ──────────────────────────
 router.get('/', async (req, res) => {
   try {
-    const pool = req.app.get('db');
     const { service_id } = req.query;
-    
-    let query = 'SELECT g.*, s.title as service_title FROM gallery g LEFT JOIN services s ON g.service_id = s.id';
-    let params = [];
-    
-    if (service_id) {
-      query += ' WHERE g.service_id = $1';
-      params.push(service_id);
+    const input = service_id ? { service_id } : {};
+
+    const response = await callExecutor('gallery_list', input);
+
+    if (!response.body.success) {
+      return res.status(500).json({ error: response.body.error || 'Erro ao buscar imagens.' });
     }
-    
-    query += ' ORDER BY g.display_order ASC, g.created_at DESC';
-    
-    const result = await pool.query(query, params);
-    res.json(result.rows);
+
+    res.json(response.body.result.images);
   } catch (err) {
-    console.error('Erro ao listar galeria:', err);
+    console.error('[gallery] Erro ao listar:', err.message);
     res.status(500).json({ error: 'Erro ao buscar imagens.' });
   }
 });
 
-// ── POST /api/gallery — Upload de imagem (admin) ────────
-router.post('/', verifyToken, upload.single('image'), async (req, res) => {
+// ── POST /api/gallery/upload-url — Solicitar Signed URL (admin) ──────────
+// Etapa 1 do fluxo de upload:
+//   Admin frontend → GET signed URL → PUT direto no R2 → POST /gallery/metadata
+router.post('/upload-url', verifyToken, async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'Nenhuma imagem enviada.' });
+    const { fileName, contentType, resourceId, display_order } = req.body;
+
+    if (!fileName || !contentType) {
+      return res.status(400).json({ error: 'fileName e contentType são obrigatórios.' });
     }
-    
-    const { caption, service_id, display_order } = req.body;
-    const imagePath = '/uploads/' + req.file.filename;
-    
-    const pool = req.app.get('db');
-    const result = await pool.query(
-      `INSERT INTO gallery (image_path, caption, service_id, display_order)
-       VALUES ($1, $2, $3, $4) RETURNING *`,
-      [imagePath, caption || null, service_id || null, display_order || 0]
-    );
-    
-    res.status(201).json(result.rows[0]);
+
+    const response = await callExecutor('generate_upload_url', {
+      fileName,
+      contentType,
+      resourceType: 'gallery',
+      resourceId: resourceId || 'default',
+      display_order,
+    });
+
+    if (!response.body.success) {
+      return res.status(500).json({ error: response.body.error || 'Erro ao gerar URL de upload.' });
+    }
+
+    // Retorna { uploadUrl, fileKey, publicUrl } para o frontend
+    res.json(response.body.result);
   } catch (err) {
-    console.error('Erro ao fazer upload:', err);
-    res.status(500).json({ error: 'Erro ao salvar imagem.' });
+    console.error('[gallery] Erro ao gerar upload URL:', err.message);
+    res.status(500).json({ error: 'Erro ao gerar URL de upload.' });
   }
 });
 
-// ── DELETE /api/gallery/:id — Remover imagem (admin) ────
+// ── POST /api/gallery/metadata — Salvar metadado após upload no R2 (admin)
+// Etapa 2 do fluxo de upload:
+//   Após PUT direto no R2, o frontend confirma o upload salvando os metadados.
+router.post('/metadata', verifyToken, async (req, res) => {
+  try {
+    const { file_key, public_url, caption, service_id, display_order } = req.body;
+
+    if (!file_key || !public_url) {
+      return res.status(400).json({ error: 'file_key e public_url são obrigatórios.' });
+    }
+
+    const response = await callExecutor('gallery_save_metadata', {
+      file_key,
+      public_url,
+      caption,
+      service_id,
+      display_order,
+    });
+
+    if (!response.body.success) {
+      return res.status(500).json({ error: response.body.error || 'Erro ao salvar metadado.' });
+    }
+
+    res.status(201).json(response.body.result.image);
+  } catch (err) {
+    console.error('[gallery] Erro ao salvar metadado:', err.message);
+    res.status(500).json({ error: 'Erro ao salvar metadado.' });
+  }
+});
+
+// ── DELETE /api/gallery/:id — Remover imagem (admin) ────────────────────
+// O executor delega a exclusão do arquivo ao r2-api e remove o metadado do banco.
 router.delete('/:id', verifyToken, async (req, res) => {
   try {
     const { id } = req.params;
-    const pool = req.app.get('db');
-    
-    // Buscar caminho da imagem
-    const img = await pool.query('SELECT image_path FROM gallery WHERE id = $1', [id]);
-    
-    if (img.rows.length === 0) {
-      return res.status(404).json({ error: 'Imagem não encontrada.' });
+
+    const response = await callExecutor('gallery_delete', { id });
+
+    if (!response.body.success) {
+      const status = response.body.error === 'Imagem não encontrada.' ? 404 : 500;
+      return res.status(status).json({ error: response.body.error || 'Erro ao remover imagem.' });
     }
-    
-    // Remover arquivo do disco
-    const filePath = path.join(__dirname, '..', img.rows[0].image_path);
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-    }
-    
-    // Remover do banco
-    await pool.query('DELETE FROM gallery WHERE id = $1', [id]);
-    
+
     res.json({ message: 'Imagem removida com sucesso.' });
   } catch (err) {
-    console.error('Erro ao remover imagem:', err);
+    console.error('[gallery] Erro ao remover:', err.message);
     res.status(500).json({ error: 'Erro ao remover imagem.' });
   }
 });

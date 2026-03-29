@@ -1,10 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const https = require('https');
-const { verifyToken } = require('./auth');
+const { callExecutor } = require('../lib/executor');
 
-// ── Fallback in-memory store (usado quando o banco não está disponível) ──
-const fallbackContacts = [];
 
 // ── Helper: valida reCAPTCHA com a API do Google ────────────────────────
 function verifyRecaptcha(token) {
@@ -89,110 +87,39 @@ router.post('/', async (req, res) => {
     }
     console.log('[contact] ✓ reCAPTCHA OK' + (captchaResult.skipped ? ' (pulado — sem chave configurada)' : '.'));
 
-    // ── 3. Persistência no banco de dados ──────────────────────────────
-    console.log('[contact] Passo 3: Tentando salvar no banco de dados...');
-    const pool = req.app.get('db');
+    // ── 3. Delegar ao executor-service via Command Bus ─────────────────
+    console.log('[contact] Passo 3: Enviando ao executor-service...');
 
-    let savedContact = null;
-    let usedFallback = false;
+    const executorResponse = await callExecutor('process_contact_form', {
+      name,
+      phone,
+      email: email || null,
+      service_interest: service_interest || null,
+      message: message || null,
+    });
 
-    try {
-      const result = await pool.query(
-        `INSERT INTO contacts (name, phone, email, service_interest, message)
-         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-        [name, phone, email || null, service_interest || null, message || null]
-      );
-      savedContact = result.rows[0];
-      console.log('[contact] ✓ Contato salvo no banco. ID:', savedContact.id);
-    } catch (dbErr) {
-      console.error('[contact] ✗ Erro ao salvar no banco PostgreSQL:', dbErr.message);
-      console.error('[contact]   Código do erro:', dbErr.code);
-      console.error('[contact]   Dica: verifique se o banco está rodando e se a tabela "contacts" existe.');
+    console.log('[contact] Resposta do executor-service:', JSON.stringify(executorResponse.body));
 
-      // Fallback: salvar em memória para não perder o lead
-      console.log('[contact] → Usando armazenamento temporário em memória como fallback...');
-      const fallback = {
-        id: Date.now(),
-        name, phone,
-        email: email || null,
-        service_interest: service_interest || null,
-        message: message || null,
-        created_at: new Date().toISOString(),
-        fallback: true
-      };
-      fallbackContacts.push(fallback);
-      savedContact = fallback;
-      usedFallback = true;
-      console.log('[contact] ✓ Salvo em memória (fallback). Total em memória:', fallbackContacts.length);
+    if (!executorResponse.body.success) {
+      const errMsg = executorResponse.body?.error?.message || 'Erro ao processar formulário no servidor.';
+      console.warn('[contact] ✗ executor-service retornou erro:', errMsg);
+      return res.status(executorResponse.statusCode >= 400 ? executorResponse.statusCode : 500).json({
+        error: errMsg
+      });
     }
 
     // ── 4. Resposta de sucesso ──────────────────────────────────────────
-    console.log('[contact] ✓ Processo concluído com', usedFallback ? 'FALLBACK (sem banco)' : 'banco de dados');
+    console.log('[contact] ✓ Processo concluído com sucesso via executor-service.');
     console.log('[contact] ═══════════════════════════════════════════\n');
 
     return res.status(201).json({
       message: 'Orçamento enviado com sucesso! Entraremos em contato em breve.',
-      contact: savedContact,
-      ...(usedFallback && { warning: 'Banco de dados temporariamente indisponível. Contato registrado localmente.' })
     });
 
   } catch (err) {
-    console.error('[contact] ✗ ERRO INESPERADO na rota de contato:', err);
-    console.error('[contact]   Mensagem:', err.message);
-    console.error('[contact]   Stack:', err.stack);
+    console.error('[contact] ✗ ERRO INESPERADO na rota de contato:', err.message);
     console.log('[contact] ═══════════════════════════════════════════\n');
     return res.status(500).json({ error: 'Erro interno ao processar orçamento. Tente novamente.' });
-  }
-});
-
-// ── GET /api/contact — Listar contatos (admin) ──────────────────────────
-router.get('/', verifyToken, async (req, res) => {
-  try {
-    const pool = req.app.get('db');
-    const result = await pool.query(
-      'SELECT * FROM contacts ORDER BY created_at DESC'
-    );
-
-    // Incluir também os contatos em memória (fallback), se houver
-    const allContacts = [...result.rows, ...fallbackContacts.filter(c => c.fallback)];
-    res.json(allContacts);
-  } catch (err) {
-    console.error('[contact] Erro ao listar contatos:', err.message);
-
-    // Se o banco falhar, retornar apenas os que estão em memória
-    if (fallbackContacts.length > 0) {
-      return res.json(fallbackContacts);
-    }
-    res.status(500).json({ error: 'Erro ao buscar contatos.' });
-  }
-});
-
-// ── PUT /api/contact/:id/read — Marcar como lido (admin) ────────────────
-router.put('/:id/read', verifyToken, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const pool = req.app.get('db');
-    await pool.query(
-      'UPDATE contacts SET is_read = TRUE WHERE id = $1',
-      [id]
-    );
-    res.json({ message: 'Contato marcado como lido.' });
-  } catch (err) {
-    console.error('[contact] Erro ao atualizar contato:', err.message);
-    res.status(500).json({ error: 'Erro ao atualizar contato.' });
-  }
-});
-
-// ── DELETE /api/contact/:id — Remover contato (admin) ───────────────────
-router.delete('/:id', verifyToken, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const pool = req.app.get('db');
-    await pool.query('DELETE FROM contacts WHERE id = $1', [id]);
-    res.json({ message: 'Contato removido.' });
-  } catch (err) {
-    console.error('[contact] Erro ao remover contato:', err.message);
-    res.status(500).json({ error: 'Erro ao remover contato.' });
   }
 });
 
